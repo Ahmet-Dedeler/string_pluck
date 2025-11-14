@@ -7,6 +7,7 @@
     "Cello Suites no. 1 BWV 1007.mid",
     "Fugue BWV 578.mid",
     "Prelude & Fugue BWV 894.mid",
+    "the-art-of-fugue-bwv-1080-contrapunctus-14.mid",
     "Toccatta & Fugue BWV 565.mid"
   ],
   "Beatles": [],
@@ -40,6 +41,9 @@
   "Isaac Albeniz": [
     "Asturias.mid"
   ],
+  "Johann Strauss": [
+    "johann-strauss-annen-polka.mid"
+  ],
   "Liszt": [
     "Hungarian Rhapsody No. 2.mid",
     "La Campanella.mid",
@@ -49,7 +53,9 @@
   "Mozart": [
     "Alla Turca.mid",
     "Eine Kleine Nachtmusik No. 2.mid",
-    "Piano Sonata No. 13.mid"
+    "Piano Sonata No. 13.mid",
+    "mozart-requiem-iii-dies-irae.mid",
+    "mozart-rex-tremendae-majestatis-from-requiem-satb-with-piano.mid"
   ],
   "Pachelbel": [
     "Canon in D.mid"
@@ -75,10 +81,15 @@
     "Spear of Justice.mid",
     "Undertale.mid"
   ],
+  "Verdi": [
+    "messa-da-requiem-ii-dies-irae-dies-irae-tuba-mirum-giuseppe-verdi.mid"
+  ],
   "misc": [
+    "basic_pitch_transcription.mid",
     "Kansas - Dust in the Wind.mid",
     "Led Zeppelin - Stairway to Heaven.mid",
     "Puff the Magic Dragon.mid",
+    "raindrops-keep-falling-on-my-head.mid",
     "Tetris theme (Korobeiniki).mid"
   ]
 }
