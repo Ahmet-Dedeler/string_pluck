@@ -1,0 +1,10 @@
+# Don't deploy these
+legacy/
+wavecomputer/
+index.html
+support.html
+NOTES
+README.md
+node_modules/
+.git/
+
