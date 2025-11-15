@@ -42,6 +42,130 @@ import { html, render, Component } from "./preact.htm.module.js"
             window.dispatchEvent(new CustomEvent('layout_mode_changed', { detail: { mode } }));
         }
 
+        const getNormalizedColorIndex = (order, total) => {
+            if (typeof order !== 'number') return 0;
+            if (typeof total !== 'number' || total <= 1) return 0;
+            const clampedOrder = Math.max(0, Math.min(order, total - 1));
+            return clampedOrder / (total - 1);
+        }
+
+        const createHueTheme = ({
+            id,
+            label,
+            startHue,
+            endHue,
+            saturation,
+            startLightness,
+            endLightness,
+            phaseMode = 'gradient', // 'gradient' keeps motion within palette, 'hue' rotates hue wheel
+        }) => ({
+            id,
+            label,
+            getColor: ({ normalizedIndex, phase = 0 }) => {
+                const hueSpan = (typeof endHue === 'number' ? endHue : startHue) - startHue;
+                let progress = normalizedIndex;
+                if (phaseMode === 'gradient') {
+                    const normalizedPhase = ((phase / 360) % 1 + 1) % 1;
+                    progress = (progress + normalizedPhase) % 1;
+                }
+                let hue = startHue + hueSpan * progress;
+                if (phaseMode === 'hue') {
+                    hue = (hue + phase) % 360;
+                }
+                const lightnessSpan = (typeof endLightness === 'number' ? endLightness : startLightness) - startLightness;
+                const lightness = startLightness + lightnessSpan * progress;
+                return hslToRgb((hue + 360) % 360, saturation, Math.max(0, Math.min(100, lightness)));
+            },
+        });
+
+        const ColorThemes = {
+            white: {
+                id: 'white',
+                label: 'White',
+                getColor: ({ normalizedIndex, phase = 0 }) => {
+                    const normalizedPhase = ((phase / 360) % 1 + 1) % 1;
+                    const progress = (normalizedIndex + normalizedPhase) % 1;
+                    const lightness = 65 + progress * 30;
+                    return hslToRgb(0, 0, Math.max(60, Math.min(100, lightness)));
+                },
+            },
+            rainbow: createHueTheme({
+                id: 'rainbow',
+                label: 'Rainbow',
+                startHue: 0,
+                endHue: 300,
+                saturation: 70,
+                startLightness: 55,
+                endLightness: 60,
+                phaseMode: 'hue',
+            }),
+            blue: createHueTheme({
+                id: 'blue',
+                label: 'Midnight Blue',
+                startHue: 205,
+                endHue: 225,
+                saturation: 80,
+                startLightness: 28,
+                endLightness: 68,
+                phaseMode: 'gradient',
+            }),
+            gold: createHueTheme({
+                id: 'gold',
+                label: 'Golden Hour',
+                startHue: 34,
+                endHue: 50,
+                saturation: 88,
+                startLightness: 32,
+                endLightness: 75,
+                phaseMode: 'gradient',
+            }),
+        };
+        const defaultColorThemeId = 'white';
+        window.ColorThemes = ColorThemes;
+
+        const savedColorTheme = typeof localStorage !== 'undefined' ? localStorage.getItem('color_theme') : null;
+        window.color_theme = ColorThemes[savedColorTheme] ? savedColorTheme : defaultColorThemeId;
+        window.color_theme_phase = 0;
+
+        const getActiveColorTheme = () => ColorThemes[window.color_theme] || ColorThemes[defaultColorThemeId];
+        window.getActiveColorTheme = getActiveColorTheme;
+        window.getColorThemeOptions = () => Object.values(ColorThemes).map(theme => ({ id: theme.id, label: theme.label }));
+
+        window.getThemeColor = (order, total, options = {}) => {
+            const theme = getActiveColorTheme();
+            const normalizedIndex = getNormalizedColorIndex(order, total);
+            const phase = typeof options.phase === 'number' ? options.phase : (window.color_theme_phase || 0);
+            if (theme && typeof theme.getColor === 'function') {
+                return theme.getColor({ index: order, total, normalizedIndex, phase });
+            }
+            return [255, 255, 255];
+        };
+
+        window.setColorTheme = (themeId) => {
+            if (!ColorThemes[themeId]) {
+                return;
+            }
+            window.color_theme = themeId;
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('color_theme', themeId);
+            }
+            window.dispatchEvent(new CustomEvent('color_theme_changed', { detail: { themeId } }));
+        };
+
+        const savedColorMotion = typeof localStorage !== 'undefined' ? localStorage.getItem('color_motion_enabled') : null;
+        window.color_motion_enabled = savedColorMotion === 'true';
+        window.setColorMotionEnabled = (enabled) => {
+            const resolved = !!enabled;
+            if (window.color_motion_enabled === resolved) {
+                return;
+            }
+            window.color_motion_enabled = resolved;
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('color_motion_enabled', resolved ? 'true' : 'false');
+            }
+            window.dispatchEvent(new CustomEvent('color_motion_changed', { detail: { enabled: resolved } }));
+        };
+
         const getStringVisualWidth = (string) => {
             if (!string) return 0;
             if (typeof string.getVisualWidth === 'function') {
@@ -552,9 +676,9 @@ import { html, render, Component } from "./preact.htm.module.js"
                 .map((center, idx) => ({ idx, y: center ? center.y : 0 }))
                 .sort((a, b) => a.y - b.y);
 
-            const rainbowColors = new Array(strings.length);
+            const colorOrders = new Array(strings.length);
             sortedByHeight.forEach(({ idx }, orderIdx) => {
-                rainbowColors[idx] = getRainbowColor(orderIdx, strings.length);
+                colorOrders[idx] = orderIdx;
             });
 
             const layoutMode = getLayoutMode();
@@ -583,7 +707,10 @@ import { html, render, Component } from "./preact.htm.module.js"
                 const string_center = resolvedCenters[i];
                 string.string_center = string_center;
 
-                const string_color = rainbowColors[i] || getRainbowColor(i, strings.length);
+                const color_order = typeof colorOrders[i] === 'number' ? colorOrders[i] : i;
+                const string_color = typeof window.getThemeColor === 'function'
+                    ? window.getThemeColor(color_order, strings.length)
+                    : getRainbowColor(i, strings.length);
 
                 midi_min = Math.min(midi_min, midi_number);
                 midi_max = Math.max(midi_max, midi_number);
@@ -601,6 +728,8 @@ import { html, render, Component } from "./preact.htm.module.js"
                     angle: string.angle,
                     color: string_color,
                     source_string: string,
+                    color_order,
+                    color_total: strings.length,
                 });
             }
 
@@ -967,6 +1096,9 @@ import { html, render, Component } from "./preact.htm.module.js"
             let note_last_frame_ms = Date.now();
             let midi_progress_time = 0;
             let note_time_current = 0;
+            const COLOR_MOTION_SPEED_DEG_PER_SEC = 90;
+            const COLOR_MOTION_SPEED_DEG_PER_MS = COLOR_MOTION_SPEED_DEG_PER_SEC / 1000;
+            let colorThemePhaseInternal = window.color_theme_phase || 0;
 
             async function set_remote_midi_track(url) {
                 console.log('fetching midi', url);
@@ -1211,6 +1343,10 @@ import { html, render, Component } from "./preact.htm.module.js"
                 const frame_delta = now - note_last_frame_ms;
                 const max_frame_delta = 100;
                 const clamped_delta = Math.min(frame_delta, max_frame_delta);
+                if (window.color_motion_enabled) {
+                    colorThemePhaseInternal = (colorThemePhaseInternal + clamped_delta * COLOR_MOTION_SPEED_DEG_PER_MS) % 360;
+                }
+                window.color_theme_phase = colorThemePhaseInternal;
                 if (!midiDrivenByAudio) {
                     advanceMidi(clamped_delta / 1000);
                 }
@@ -1570,6 +1706,8 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                         speed: 50,
                         midi_progress_percentage: 0,
                         midi_length_seconds: 0,
+                        color_theme: window.color_theme,
+                        color_motion_enabled: window.color_motion_enabled,
                     }
                 }
                 componentDidMount() {
@@ -1622,6 +1760,15 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                         this.setState({ layout_mode: e.detail?.mode || getLayoutMode() });
                     };
                     window.addEventListener('layout_mode_changed', this.layoutModeListener);
+                    this.colorThemeListener = (e) => {
+                        this.setState({ color_theme: e.detail?.themeId || window.color_theme });
+                    };
+                    window.addEventListener('color_theme_changed', this.colorThemeListener);
+                    this.colorMotionListener = (e) => {
+                        const enabled = typeof e.detail?.enabled === 'boolean' ? e.detail.enabled : window.color_motion_enabled;
+                        this.setState({ color_motion_enabled: enabled });
+                    };
+                    window.addEventListener('color_motion_changed', this.colorMotionListener);
 
                     // load midi list from midis/midis.json
                     fetch('midis/midis.json').then(r => r.json()).then(midis => {
@@ -1637,6 +1784,12 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                 componentWillUnmount() {
                     if (this.layoutModeListener) {
                         window.removeEventListener('layout_mode_changed', this.layoutModeListener);
+                    }
+                    if (this.colorThemeListener) {
+                        window.removeEventListener('color_theme_changed', this.colorThemeListener);
+                    }
+                    if (this.colorMotionListener) {
+                        window.removeEventListener('color_motion_changed', this.colorMotionListener);
                     }
                 }
 
@@ -1655,6 +1808,11 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                         acc[folder].push(cur);
                         return acc;
                     }, {});
+                    const colorThemeOptions = (typeof window.getColorThemeOptions === 'function'
+                        ? window.getColorThemeOptions()
+                        : Object.values(window.ColorThemes || {}).map(theme => ({ id: theme.id, label: theme.label })));
+                    const currentColorTheme = this.state.color_theme || window.color_theme || 'white';
+                    const colorMotionEnabled = typeof this.state.color_motion_enabled === 'boolean' ? this.state.color_motion_enabled : !!window.color_motion_enabled;
 
                     return html`
                             <div class='controls-top-right'>
@@ -1712,6 +1870,30 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                                     }}>
                                         ${show_modes ? `ⓧ` : html`<span class='infotoggle'>❓</span>`}
                                 </${DivCustomClick}>
+
+                                <div class='color-theme-panel'>
+                                    <label class='color-theme-select'>
+                                        <span>Color Theme</span>
+                                        <select value=${currentColorTheme} onChange=${(e) => {
+                                            const value = e.target.value;
+                                            window.setColorTheme(value);
+                                            this.setState({ color_theme: value });
+                                        }}>
+                                            ${colorThemeOptions.map(option => html`<option value=${option.id} key=${option.id}>${option.label}</option>`)}
+                                        </select>
+                                    </label>
+                                    <label class='color-motion-toggle'>
+                                        <input
+                                            type='checkbox'
+                                            checked=${colorMotionEnabled}
+                                            onChange=${(e) => {
+                                                window.setColorMotionEnabled(e.target.checked);
+                                                this.setState({ color_motion_enabled: e.target.checked });
+                                            }}
+                                        />
+                                        <span>Color Motion</span>
+                                    </label>
+                                </div>
 
                                 ${show_info ? html`
                                     <div class='info-panel'>

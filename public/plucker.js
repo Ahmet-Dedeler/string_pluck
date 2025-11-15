@@ -85,7 +85,25 @@ function drawRoundedPolygon(ctx,
     ctx.restore()
 }
 
-function pluckableString({ id, canvas, freq, midi_number, overtones, wave_height, string_width, string_center, angle, duration, audio, string_slack, screen, color, layout = {} }) {
+function pluckableString({
+    id,
+    canvas,
+    freq,
+    midi_number,
+    overtones,
+    wave_height,
+    string_width,
+    string_center,
+    angle,
+    duration,
+    audio,
+    string_slack,
+    screen,
+    color,
+    layout = {},
+    color_order,
+    color_total,
+}) {
     this.audio = audio;
     this.overtones = overtones; // {freq, amplitude}
     this.id = id;
@@ -120,12 +138,20 @@ function pluckableString({ id, canvas, freq, midi_number, overtones, wave_height
     this.string_position = { x: string_center.x - string_width / 2, y: string_center.y };
     this.string_height = wave_height;
     this.base_color = color || COLOR_IDLE;
+    this.default_color = this.base_color;
+    this.color_order = typeof color_order === 'number' ? color_order : undefined;
+    this.color_total = typeof color_total === 'number' ? color_total : undefined;
+    this.getThemeBaseColor = function() {
+        if (typeof window.getThemeColor === 'function' && typeof this.color_order === 'number' && typeof this.color_total === 'number') {
+            return window.getThemeColor(this.color_order, this.color_total);
+        }
+        return this.default_color;
+    }
     this.layout = {
         mode: layout.mode || (window.layout_mode || (window.LayoutModes ? window.LayoutModes.classic : 'classic')),
         uniformWidth: typeof layout.uniformWidth === 'number' ? layout.uniformWidth : string_width,
         midiRange: layout.midiRange || { min: midi_number, max: midi_number },
     };
-    this.inactive_color = dimColor(this.base_color, 0.5);
 
     this.setLayoutOptions = function(options = {}) {
         if (options.mode && window.LayoutModes && Object.values(window.LayoutModes).includes(options.mode)) {
@@ -227,9 +253,11 @@ function pluckableString({ id, canvas, freq, midi_number, overtones, wave_height
         context.translate(-this.string_center.x, -this.string_center.y);
         
         const isActive = !!this.playing;
-        let color_idle = this.base_color || COLOR_IDLE;
+        const themeBaseColor = this.getThemeBaseColor();
+        const inactiveColor = dimColor(themeBaseColor, 0.5);
+        let color_idle = themeBaseColor || COLOR_IDLE;
         if (!isActive) {
-            color_idle = this.inactive_color;
+            color_idle = inactiveColor;
         }
         if(window.canvas_mode == window.CanvasModes.draw) {
             color_idle = COLOR_DRAW;
@@ -244,7 +272,7 @@ function pluckableString({ id, canvas, freq, midi_number, overtones, wave_height
             context.strokeStyle = `rgba(${COLOR_HOVER[0]}, ${COLOR_HOVER[1]}, ${COLOR_HOVER[2]}, 1.0)`
             // show text
             context.font = NOTE_FONT;
-            const hoverTextColor = mixColors(isActive ? this.base_color : this.inactive_color, COLOR_PLUCKED, 0.6);
+            const hoverTextColor = mixColors(isActive ? themeBaseColor : inactiveColor, COLOR_PLUCKED, 0.6);
             context.fillStyle = `rgba(${hoverTextColor[0]}, ${hoverTextColor[1]}, ${hoverTextColor[2]}, 1)`;
             context.fillText(this.note_name, startX + visualWidth + 15, this.string_position.y + 5);
 
@@ -280,8 +308,9 @@ function pluckableString({ id, canvas, freq, midi_number, overtones, wave_height
         let progress = (this.duration - this.time_diff) / this.duration;
         let brightness = Math.max(0, Math.min(1, 0.1 + Math.pow(progress, 4)));
 
+        const themeBaseColor = this.getThemeBaseColor();
         const energyBoost = Math.pow(1 - progress, 0.8);
-        const energized_color = mixColors(this.base_color, COLOR_PLUCKED, energyBoost * 0.35);
+        const energized_color = mixColors(themeBaseColor, COLOR_PLUCKED, energyBoost * 0.35);
         const alpha = 1.0;
 
 
@@ -368,7 +397,7 @@ function pluckableString({ id, canvas, freq, midi_number, overtones, wave_height
     this.draw_pluck = function (offsetX, offsetY) {
         let context = this.context;
         context.save();
-        const plucking_color_array = mixColors(this.base_color, COLOR_PLUCKED, 0.3);
+        const plucking_color_array = mixColors(this.getThemeBaseColor(), COLOR_PLUCKED, 0.3);
         const plucking_color = colorToRgba(plucking_color_array, 1.0);
         context.strokeStyle = plucking_color
         context.strokeStyle = plucking_color
