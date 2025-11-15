@@ -10,6 +10,7 @@ export default function Home() {
     audioShader: false,
     plucker: false,
     tonejs: false,
+    webaudiofont: false,
     appLogic: false,
   })
 
@@ -51,6 +52,11 @@ export default function Home() {
         src="/tonejs_midi.js"
         strategy="afterInteractive"
         onLoad={() => setScriptsLoaded(prev => ({ ...prev, tonejs: true }))}
+      />
+      <Script
+        src="/webaudiofont/WebAudioFontPlayer.js"
+        strategy="afterInteractive"
+        onLoad={() => setScriptsLoaded(prev => ({ ...prev, webaudiofont: true }))}
       />
       <Script
         src="/app-logic.js"

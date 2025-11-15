@@ -103,6 +103,8 @@ function pluckableString({
     layout = {},
     color_order,
     color_total,
+    instrumentPreset,
+    instrumentOptions = {},
 }) {
     this.audio = audio;
     this.overtones = overtones; // {freq, amplitude}
@@ -165,6 +167,33 @@ function pluckableString({
         }
     }
 
+    this.instrumentOptionsSeed = instrumentOptions || {};
+    this.instrumentPreset = instrumentPreset || null;
+    this.instrumentOvertoneMultipliers = new Array(this.overtones.length).fill(1);
+    this.instrumentDecayBase = undefined;
+    this.applyInstrumentPreset = function(preset, options = {}) {
+        const resolvedPreset = preset || null;
+        this.instrumentPreset = resolvedPreset;
+        if (resolvedPreset && typeof resolvedPreset.getOvertoneGain === 'function') {
+            for (let i = 0; i < this.overtones.length; i++) {
+                const gain = resolvedPreset.getOvertoneGain(i, this.overtones[i].freq, { baseFreq: this.base_freq, string: this });
+                this.instrumentOvertoneMultipliers[i] = Math.max(0.02, gain || 1);
+            }
+        } else {
+            for (let i = 0; i < this.instrumentOvertoneMultipliers.length; i++) {
+                this.instrumentOvertoneMultipliers[i] = 1;
+            }
+        }
+        if (options && typeof options.duration === 'number' && options.duration > 0) {
+            this.duration = options.duration;
+        }
+        this.instrumentDecayBase = options && typeof options.decayPower === 'number' ? options.decayPower : undefined;
+    };
+    this.getInstrumentOvertoneGain = function(index) {
+        if (typeof index !== 'number') return 1;
+        return this.instrumentOvertoneMultipliers[index] ?? 1;
+    };
+
     this.getVisualWidth = function({ includeDynamics = false } = {}) {
         const layoutMode = this.layout.mode || (window.LayoutModes ? window.LayoutModes.classic : 'classic');
         let baseWidth = layoutMode === (window.LayoutModes ? window.LayoutModes.uniform : 'uniform')
@@ -201,6 +230,9 @@ function pluckableString({
     this.updateVisualPosition({ includeDynamics: false });
 
     this.base_freq = overtones[0].freq;
+    if (this.instrumentPreset) {
+        this.applyInstrumentPreset(this.instrumentPreset, this.instrumentOptionsSeed);
+    }
     this.string_slack = string_slack || Math.min(25, Math.max(8, 10000/this.freq));
 
     this.playing = false;
@@ -221,8 +253,11 @@ function pluckableString({
 
     this.autoEnvelopeValue = function (overtone, time_diff) {
         let percent_progress = Math.min(1, time_diff / this.duration);
+        percent_progress = Math.max(0, percent_progress);
         let { freq, amplitude } = overtone;
-        let auto = amplitude * Math.pow(1 - percent_progress, 2 * freq / this.base_freq);
+        const baseDecay = typeof this.instrumentDecayBase === 'number' ? this.instrumentDecayBase : 2;
+        const decayExponent = Math.max(0.1, baseDecay * (freq / this.base_freq));
+        let auto = amplitude * Math.pow(Math.max(0, 1 - percent_progress), decayExponent);
 
         return auto;
     }
@@ -544,7 +579,9 @@ function pluckableString({
             let low_freq_amp_adjustment = this.freq < 200  ? window.smoothTransition(this.freq, 0, 200, wi/3 + 0.5, 1) : 1;
             let high_freq_amp_adjustment = this.freq > 1200 ? window.smoothTransition(this.freq, 1200, 2000, 1, 0.5) : 1;
 
-            this.overtones[wi].amplitude = low_freq_amp_adjustment * high_freq_amp_adjustment * (freqs[this.overtones[wi].freq]) / 5
+            const resonance = freqs[this.overtones[wi].freq] || 0;
+            const instrumentGain = this.getInstrumentOvertoneGain(wi);
+            this.overtones[wi].amplitude = instrumentGain * low_freq_amp_adjustment * high_freq_amp_adjustment * (resonance) / 5
         }
 
         this.start_time = Date.now();
@@ -552,6 +589,10 @@ function pluckableString({
         this.hand_plucking = false;
 
         this.play_sound();
+        if (typeof window.playWebAudioFontPreview === 'function' && typeof this.midi_number === 'number') {
+            const normalizedVelocity = Math.min(1, Math.abs(relativeY) / Math.max(1, this.string_slack) + 0.2);
+            window.playWebAudioFontPreview(this.midi_number, normalizedVelocity);
+        }
     }
 
     this.post_message_to_worklet = function (message) {

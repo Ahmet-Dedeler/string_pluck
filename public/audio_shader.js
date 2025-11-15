@@ -77,6 +77,7 @@ function AudioShader(num_strings, num_overtones) {
   uniform float u_sampleRate;
   uniform float u_blockOffset;
   uniform vec2 u_resolution;
+  uniform float u_stringDurations[NUM_STRINGS];
 
   //uniform float u_overtones[NUM_STRINGS * NUM_OVERTONES];
   uniform sampler2D u_overtones_texture;
@@ -103,7 +104,10 @@ function AudioShader(num_strings, num_overtones) {
                 float ofreq = vals.x;
                 float start_time = vals.z;
                 float prev_amp = vals.w;
-                float duration = 4.0;
+                float duration = u_stringDurations[i];
+                if (duration <= 0.0) {
+                    duration = 0.01;
+                }
                 float ttime = time - start_time;
                 float block_progress = min(1.0, 2.0 * coord.x / u_resolution.x);
                 float ramped_amp = prev_amp + (oamp - prev_amp) * (block_progress);
@@ -131,6 +135,24 @@ function AudioShader(num_strings, num_overtones) {
     o_color = vec4(vl.x, vh.x, vl.y, vh.y);
   }
   `;
+
+    this.pendingDurationsMs = [];
+    this.stringDurations = null;
+    this.setStringDurations = (durationsMs = []) => {
+        const normalized = Array.isArray(durationsMs) || durationsMs instanceof Float32Array
+            ? Array.from(durationsMs)
+            : [];
+        this.pendingDurationsMs = normalized;
+        if (!this.stringDurations || !gl || !this.uniforms || !this.uniforms['u_stringDurations']) {
+            return;
+        }
+        for (let i = 0; i < num_strings; i++) {
+            const valueMs = typeof normalized[i] === 'number' ? normalized[i] : 4000;
+            this.stringDurations[i] = Math.max(0.05, valueMs / 1000);
+        }
+        gl.useProgram(this.program);
+        gl.uniform1fv(this.uniforms['u_stringDurations'], this.stringDurations);
+    };
 
     let buffer_size = 1024;
     
@@ -165,11 +187,17 @@ function AudioShader(num_strings, num_overtones) {
         this.program = program;
         const samples = WIDTH * HEIGHT;
 
-        this.uniforms = getUniformLocations(gl, program, ['u_sampleRate', 'u_blockOffset', 'u_resolution', 'u_overtones']);
+        this.uniforms = getUniformLocations(gl, program, ['u_sampleRate', 'u_blockOffset', 'u_resolution', 'u_overtones', 'u_stringDurations']);
 
         gl.useProgram(program);
         gl.uniform1f(this.uniforms['u_sampleRate'], this.audioCtx.sampleRate);
         gl.uniform2f(this.uniforms['u_resolution'], WIDTH, HEIGHT);
+        this.stringDurations = new Float32Array(num_strings);
+        if (this.pendingDurationsMs && this.pendingDurationsMs.length) {
+            this.setStringDurations(this.pendingDurationsMs);
+        } else {
+            this.setStringDurations(new Array(num_strings).fill(4000));
+        }
 
         const overtone_amplitudes = new Float32Array(num_strings * num_overtones);
         gl.uniform1f(this.uniforms['u_num_strings'], num_strings);
@@ -251,12 +279,29 @@ function AudioShader(num_strings, num_overtones) {
 
         };
 
-        // node.connect(this.audioCtx.destination);
-
-        // const gainNode = this.audioCtx.createGain();
-        // gainNode.gain.value = 1;
-        // gainNode.connect(this.audioCtx.destination);
-        node.connect(this.audioCtx.destination);
+        const shaderLimiterNode = this.audioCtx.createDynamicsCompressor();
+        shaderLimiterNode.threshold.value = -18;
+        shaderLimiterNode.knee.value = 18;
+        shaderLimiterNode.ratio.value = 8;
+        shaderLimiterNode.attack.value = 0.003;
+        shaderLimiterNode.release.value = 0.25;
+        const shaderGainNode = this.audioCtx.createGain();
+        const DEFAULT_SHADER_GAIN = 9.5; // this is best to make the legacy string be the same loudness as the others.
+        const initialShaderGain = typeof window.shader_output_gain === 'number'
+            ? window.shader_output_gain
+            : DEFAULT_SHADER_GAIN;
+        shaderGainNode.gain.value = initialShaderGain;
+        window.shader_output_gain = initialShaderGain;
+        node.connect(shaderLimiterNode);
+        shaderLimiterNode.connect(shaderGainNode);
+        shaderGainNode.connect(this.audioCtx.destination);
+        this.outputLimiterNode = shaderLimiterNode;
+        this.outputGainNode = shaderGainNode;
+        this.setOutputGain = (value) => {
+            const resolved = typeof value === 'number' ? value : 1;
+            shaderGainNode.gain.value = resolved;
+            window.shader_output_gain = resolved;
+        };
 
         if (typeof window.setMidiSchedulerSource === 'function') {
             window.setMidiSchedulerSource('audio');

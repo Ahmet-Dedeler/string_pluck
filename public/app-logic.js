@@ -123,6 +123,26 @@ import { html, render, Component } from "./preact.htm.module.js"
         const defaultColorThemeId = 'white';
         window.ColorThemes = ColorThemes;
 
+        const ColorThemePreviewStyles = {
+            white: 'linear-gradient(135deg, #dcdcdc, #fefefe, #bfbfbf)',
+            rainbow: 'linear-gradient(135deg, #ff5f6d, #ffc371, #47c9ff)',
+            blue: 'linear-gradient(135deg, #0f1c3f, #1d3f72, #35a0ff)',
+            gold: 'linear-gradient(135deg, #5c3b07, #d7a12a, #fff2b0)',
+        };
+
+        const getColorThemePreviewStyle = (themeId) => ColorThemePreviewStyles[themeId] || ColorThemePreviewStyles[defaultColorThemeId];
+
+        const getNextListValue = (list, current) => {
+            if (!Array.isArray(list) || list.length === 0) {
+                return current;
+            }
+            const index = list.indexOf(current);
+            if (index === -1) {
+                return list[0];
+            }
+            return list[(index + 1) % list.length];
+        };
+
         const savedColorTheme = typeof localStorage !== 'undefined' ? localStorage.getItem('color_theme') : null;
         window.color_theme = ColorThemes[savedColorTheme] ? savedColorTheme : defaultColorThemeId;
         window.color_theme_phase = 0;
@@ -164,6 +184,397 @@ import { html, render, Component } from "./preact.htm.module.js"
                 localStorage.setItem('color_motion_enabled', resolved ? 'true' : 'false');
             }
             window.dispatchEvent(new CustomEvent('color_motion_changed', { detail: { enabled: resolved } }));
+        };
+
+        const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+        const AudioEngines = {
+            shader: 'shader',
+            waf: 'webaudiofont',
+        };
+
+        const WebAudioFontInstruments = {
+            plucked: {
+                id: 'plucked',
+                label: 'Legacy Strings',
+                description: 'Original GPU plucked-string sound',
+                engine: AudioEngines.shader,
+                icon: '🪕',
+            },
+            piano: {
+                id: 'piano',
+                label: 'Grand Piano',
+                description: 'Acoustic grand from WebAudioFont',
+                engine: AudioEngines.waf,
+                script: '/webaudiofont/0000_JCLive_sf2_file.js',
+                variable: '_tone_0000_JCLive_sf2_file',
+                icon: '🎹',
+            },
+            organ: {
+                id: 'organ',
+                label: 'Drawbar Organ',
+                description: 'Classic drawbar organ',
+                engine: AudioEngines.waf,
+                script: '/webaudiofont/0160_JCLive_sf2_file.js',
+                variable: '_tone_0160_JCLive_sf2_file',
+                icon: '🎛️',
+            },
+            sax: {
+                id: 'sax',
+                label: 'Alto Sax',
+                description: 'Expressive alto saxophone',
+                engine: AudioEngines.waf,
+                script: '/webaudiofont/0650_JCLive_sf2_file.js',
+                variable: '_tone_0650_JCLive_sf2_file',
+                icon: '🎷',
+            },
+            synthpad: {
+                id: 'synthpad',
+                label: 'Warm Synth Pad',
+                description: 'Lush synth pad for ambience',
+                engine: AudioEngines.waf,
+                script: '/webaudiofont/0880_JCLive_sf2_file.js',
+                variable: '_tone_0880_JCLive_sf2_file',
+                icon: '🌌',
+            },
+            harp: {
+                id: 'harp',
+                label: 'Plucked Harp',
+                description: 'Orchestral harp / plucked strings',
+                engine: AudioEngines.waf,
+                script: '/webaudiofont/1050_JCLive_sf2_file.js',
+                variable: '_tone_1050_JCLive_sf2_file',
+                icon: '🎼',
+            },
+        };
+
+        const NORMALIZATION_CONFIG = {
+            targetRms: 0.18,
+            minGain: 0.35,
+            maxGain: 1.65,
+            maxSamples: 48000,
+            minStride: 32,
+        };
+        const presetGainCache = new WeakMap();
+        const computeMedian = (values) => {
+            if (!Array.isArray(values) || !values.length) {
+                return null;
+            }
+            const sorted = values.slice().sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            if (sorted.length % 2) {
+                return sorted[mid];
+            }
+            return (sorted[mid - 1] + sorted[mid]) / 2;
+        };
+        const computeZoneRms = (zone) => {
+            if (!zone || !zone.buffer || typeof zone.buffer.getChannelData !== 'function') {
+                return null;
+            }
+            let channelData;
+            try {
+                channelData = zone.buffer.getChannelData(0);
+            } catch (err) {
+                console.warn('Failed to read preset buffer data', err);
+                return null;
+            }
+            if (!channelData || !channelData.length) {
+                return null;
+            }
+            const strideBase = Math.floor(channelData.length / Math.max(1, NORMALIZATION_CONFIG.maxSamples));
+            const stride = Math.max(NORMALIZATION_CONFIG.minStride, strideBase || 1);
+            let sumSq = 0;
+            let sampleCount = 0;
+            for (let i = 0; i < channelData.length; i += stride) {
+                const sample = channelData[i];
+                sumSq += sample * sample;
+                sampleCount++;
+            }
+            if (!sampleCount) {
+                return null;
+            }
+            return Math.sqrt(sumSq / sampleCount);
+        };
+        const computePresetNormalizationGain = (preset) => {
+            if (!preset || !Array.isArray(preset.zones) || !preset.zones.length) {
+                return 1;
+            }
+            const visitedBuffers = new Set();
+            const rmsValues = [];
+            for (const zone of preset.zones) {
+                const buffer = zone && zone.buffer;
+                if (!buffer || visitedBuffers.has(buffer)) {
+                    continue;
+                }
+                visitedBuffers.add(buffer);
+                const rms = computeZoneRms(zone);
+                if (typeof rms === 'number' && Number.isFinite(rms) && rms > 0) {
+                    rmsValues.push(rms);
+                }
+            }
+            if (!rmsValues.length) {
+                return 1;
+            }
+            const medianRms = computeMedian(rmsValues);
+            if (!medianRms || !Number.isFinite(medianRms) || medianRms <= 0) {
+                return 1;
+            }
+            const rawGain = NORMALIZATION_CONFIG.targetRms / medianRms;
+            return clamp(rawGain, NORMALIZATION_CONFIG.minGain, NORMALIZATION_CONFIG.maxGain);
+        };
+        const getPresetGainScalar = (preset) => {
+            if (!preset || typeof preset !== 'object') {
+                return 1;
+            }
+            if (presetGainCache.has(preset)) {
+                return presetGainCache.get(preset);
+            }
+            const gain = computePresetNormalizationGain(preset);
+            presetGainCache.set(preset, gain);
+            return gain;
+        };
+
+        const instrumentOptions = Object.values(WebAudioFontInstruments).map(instr => ({
+            id: instr.id,
+            label: instr.label,
+            description: instr.description,
+            icon: instr.icon || '♪',
+        }));
+
+        const defaultMidiGuidance = {
+            getPrepDuration: ({ defaultDuration, timeSincePrevNote }) => {
+                const base = defaultDuration ?? 0.35;
+                if (!timeSincePrevNote) {
+                    return base;
+                }
+                const spacing = Math.max(0.05, timeSincePrevNote / 6);
+                return Math.min(base, spacing);
+            },
+            getHorizontalOffset: ({ string, velocity, visualWidth }) => {
+                const normalizedVelocity = velocity ? Math.pow(velocity, 0.6) : 1;
+                const highFreqDamping = smoothTransition(string.freq, 330, 880, 1, 0.5);
+                return string.string_center.x + normalizedVelocity * visualWidth / 2 * highFreqDamping;
+            },
+            getVerticalOffset: ({ string, velocity, progress }) => {
+                const velocityStrength = velocity ? Math.pow(velocity, 1.5) : 1;
+                return string.string_center.y + Math.min(
+                    string.string_slack - 1,
+                    progress * velocityStrength * string.string_slack
+                );
+            },
+        };
+
+        const scriptLoadCache = {};
+        const loadExternalScript = (src) => {
+            if (!src) {
+                return Promise.resolve();
+            }
+            if (!scriptLoadCache[src]) {
+                scriptLoadCache[src] = new Promise((resolve, reject) => {
+                    if (document.querySelector(`script[data-inline-src="${src}"]`)) {
+                        resolve();
+                        return;
+                    }
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.async = true;
+                    script.dataset.inlineSrc = src;
+                    script.onload = () => resolve();
+                    script.onerror = (err) => reject(err);
+                    document.body.appendChild(script);
+                });
+            }
+            return scriptLoadCache[src];
+        };
+
+        const defaultInstrumentId = 'piano';
+        const savedInstrumentId = typeof localStorage !== 'undefined' ? localStorage.getItem('instrument_preset') : null;
+        window.instrument_preset_id = WebAudioFontInstruments[savedInstrumentId] ? savedInstrumentId : defaultInstrumentId;
+        window.use_shader_audio = WebAudioFontInstruments[window.instrument_preset_id]?.engine === AudioEngines.shader;
+
+        const getActiveInstrumentConfig = () => WebAudioFontInstruments[window.instrument_preset_id] || WebAudioFontInstruments[defaultInstrumentId];
+        const isWebAudioFontActive = () => getActiveInstrumentConfig().engine === AudioEngines.waf;
+        const isShaderAudioEnabled = () => getActiveInstrumentConfig().engine === AudioEngines.shader;
+
+        window.getInstrumentOptions = () => instrumentOptions;
+
+        let webAudioFontManagerPromise = null;
+        const getWebAudioFontManager = () => {
+            if (!webAudioFontManagerPromise) {
+                webAudioFontManagerPromise = new Promise((resolve, reject) => {
+                    const AudioContextFunc = window.AudioContext || window.webkitAudioContext;
+                    const ensurePlayer = () => {
+                        if (typeof window.WebAudioFontPlayer === 'function') {
+                            try {
+                                const audioCtx = new AudioContextFunc();
+                                const player = new window.WebAudioFontPlayer();
+                                const mixGainNode = audioCtx.createGain();
+                                mixGainNode.gain.value = 1;
+                                const limiterNode = audioCtx.createDynamicsCompressor();
+                                limiterNode.threshold.value = -18;
+                                limiterNode.knee.value = 18;
+                                limiterNode.ratio.value = 8;
+                                limiterNode.attack.value = 0.002;
+                                limiterNode.release.value = 0.25;
+                                const masterGainNode = audioCtx.createGain();
+                                masterGainNode.gain.value = 0.85;
+                                mixGainNode.connect(limiterNode);
+                                limiterNode.connect(masterGainNode);
+                                masterGainNode.connect(audioCtx.destination);
+                                resolve({
+                                    audioCtx,
+                                    player,
+                                    decodedPresets: new Set(),
+                                    activeVoices: new Set(),
+                                    currentPresetId: null,
+                                    outputNode: mixGainNode,
+                                    limiterNode,
+                                    masterGainNode,
+                                });
+                            } catch (err) {
+                                reject(err);
+                            }
+                        } else {
+                            setTimeout(ensurePlayer, 50);
+                        }
+                    };
+                    ensurePlayer();
+                });
+            }
+            return webAudioFontManagerPromise;
+        };
+
+        const stopAllWebAudioFontVoices = () => {
+            if (!webAudioFontManagerPromise) {
+                return;
+            }
+            webAudioFontManagerPromise.then(manager => {
+                if (!manager || !manager.player) {
+                    return;
+                }
+                try {
+                    manager.player.cancelQueue(manager.audioCtx);
+                } catch (err) {
+                    console.error('Failed to cancel WebAudioFont queue', err);
+                }
+                manager.activeVoices.clear();
+            }).catch(() => {});
+        };
+
+        const activateWebAudioFontInstrument = async (instrument) => {
+            const manager = await getWebAudioFontManager();
+            await loadExternalScript(instrument.script);
+            const presetVar = window[instrument.variable];
+            if (!presetVar) {
+                throw new Error(`WebAudioFont preset ${instrument.variable} missing`);
+            }
+            if (!manager.decodedPresets.has(instrument.variable)) {
+                manager.player.loader.decodeAfterLoading(manager.audioCtx, instrument.variable);
+                manager.decodedPresets.add(instrument.variable);
+            }
+            manager.currentPresetId = instrument.id;
+            manager.currentPresetVar = presetVar;
+            if (manager.audioCtx.state === 'suspended') {
+                try {
+                    await manager.audioCtx.resume();
+                } catch (err) {
+                    console.warn('Unable to resume WebAudioFont audio context', err);
+                }
+            }
+            return manager;
+        };
+
+        const scheduleWebAudioFontNote = (note) => {
+            if (!isWebAudioFontActive() || !note || typeof note.midi !== 'number') {
+                return;
+            }
+            const instrument = getActiveInstrumentConfig();
+            activateWebAudioFontInstrument(instrument).then(manager => {
+                if (!manager || !manager.currentPresetVar) {
+                    return;
+                }
+                const velocity = typeof note.velocity === 'number' ? clamp(note.velocity, 0, 1) : 0.8;
+                const durationSeconds = Math.max(0.1, note.durationSeconds || 1);
+                const gainScalar = getPresetGainScalar(manager.currentPresetVar);
+                const instrumentScalar = typeof instrument.volumeScalar === 'number' ? instrument.volumeScalar : 1;
+                const normalizedVelocity = clamp(velocity * gainScalar * instrumentScalar, 0, 1);
+                const targetNode = manager.outputNode || manager.audioCtx.destination;
+                const envelope = manager.player.queueWaveTable(
+                    manager.audioCtx,
+                    targetNode,
+                    manager.currentPresetVar,
+                    manager.audioCtx.currentTime,
+                    note.midi,
+                    durationSeconds,
+                    normalizedVelocity
+                );
+                if (envelope) {
+                    manager.activeVoices.add(envelope);
+                    setTimeout(() => manager.activeVoices.delete(envelope), (durationSeconds + 2) * 1000);
+                }
+            }).catch(err => {
+                console.error('Failed to play WebAudioFont note', err);
+            });
+        };
+
+        window.playWebAudioFontPreview = (midiNumber, velocity = 0.8) => {
+            if (!isWebAudioFontActive()) {
+                return;
+            }
+            scheduleWebAudioFontNote({
+                midi: midiNumber,
+                velocity: clamp(velocity, 0, 1),
+                durationSeconds: 1,
+            });
+        };
+
+        let pendingInstrumentChange = false;
+        const dispatchInstrumentChange = () => {
+            if (pendingInstrumentChange) return;
+            pendingInstrumentChange = true;
+            requestAnimationFrame(() => {
+                pendingInstrumentChange = false;
+                window.dispatchEvent(new CustomEvent('instrument_changed', { detail: { instrument: getActiveInstrumentConfig() } }));
+            });
+        };
+
+        const rebuildStringsForInstrumentChange = () => {
+            if (!window.canvas_jq || !Array.isArray(pluckableStrings) || !pluckableStrings.length) {
+                return;
+            }
+            const snapshot = pluckableStrings.map(s => ({
+                string_center: { x: s.string_center.x, y: s.string_center.y },
+                string_width: s.string_width,
+                angle: s.angle,
+                freq: s.freq,
+                midi_number: s.midi_number,
+                screen: s.screen,
+            }));
+            resetAndAddStrings(window.canvas_jq, snapshot, { skip_audio: false });
+        };
+
+        window.setInstrumentPreset = async (instrumentId) => {
+            const targetId = WebAudioFontInstruments[instrumentId] ? instrumentId : defaultInstrumentId;
+            if (window.instrument_preset_id === targetId) {
+                return;
+            }
+            window.instrument_preset_id = targetId;
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('instrument_preset', targetId);
+            }
+            const instrument = getActiveInstrumentConfig();
+            window.use_shader_audio = instrument.engine === AudioEngines.shader;
+            if (instrument.engine === AudioEngines.waf) {
+                try {
+                    await activateWebAudioFontInstrument(instrument);
+                } catch (err) {
+                    console.error('Failed to activate WebAudioFont instrument', err);
+                }
+            } else {
+                stopAllWebAudioFontVoices();
+            }
+            rebuildStringsForInstrumentChange();
+            dispatchInstrumentChange();
         };
 
         const getStringVisualWidth = (string) => {
@@ -639,8 +1050,6 @@ import { html, render, Component } from "./preact.htm.module.js"
             let width = canvas_jq.width();
             let height = canvas_jq.height();
 
-            let duration = 5000;
-
             const num_strings = strings.length;
             const num_overtones = 12;
 
@@ -651,8 +1060,10 @@ import { html, render, Component } from "./preact.htm.module.js"
                     await window.audioShader.destroy();
                     window.audioShader = null;
                 }
-                window.audioShader = new AudioShader(num_strings, num_overtones);
-                window.audioShader.setup_audio();
+                if (isShaderAudioEnabled()) {
+                    window.audioShader = new AudioShader(num_strings, num_overtones);
+                    window.audioShader.setup_audio();
+                }
             }
 
             pluckableStrings.length = 0;
@@ -687,6 +1098,7 @@ import { html, render, Component } from "./preact.htm.module.js"
             const preparedStrings = [];
             let midi_min = Infinity;
             let midi_max = -Infinity;
+            const shaderAudio = isShaderAudioEnabled() ? window.audioShader : null;
 
             for (let i = 0; i < strings.length; i++) {
                 const string = strings[i];
@@ -703,6 +1115,7 @@ import { html, render, Component } from "./preact.htm.module.js"
                 }
                 const midi_number = getMidiNumberFromFreq(freq);
                 let { note, error } = Notes.freq_to_note(freq);
+                const sustainDuration = 5000;
 
                 const string_center = resolvedCenters[i];
                 string.string_center = string_center;
@@ -730,6 +1143,7 @@ import { html, render, Component } from "./preact.htm.module.js"
                     source_string: string,
                     color_order,
                     color_total: strings.length,
+                    duration: sustainDuration,
                 });
             }
 
@@ -739,15 +1153,19 @@ import { html, render, Component } from "./preact.htm.module.js"
             };
 
             preparedStrings.forEach((config) => {
-                const { source_string, ...rest } = config;
+                const {
+                    source_string,
+                    duration: preparedDuration,
+                    ...rest
+                } = config;
                 const slack_freq = parseFloat(source_string.freq || rest.freq);
                 const computed_slack = slack_freq ? Math.min(20, Math.max(8, 10000 / slack_freq)) : 12;
 
                 const drawWave = new pluckableString({
                     ...rest,
                     canvas: canvas_jq.get(0),
-                    duration,
-                    audio: window.audioShader,
+                    duration: preparedDuration,
+                    audio: shaderAudio,
                     string_slack: computed_slack,
                     screen: { width, height },
                     layout: {
@@ -785,6 +1203,7 @@ import { html, render, Component } from "./preact.htm.module.js"
             // create a drawing area inside an element
 
             var canvas_jq = new Canvas($('#draw').empty());
+            window.canvas_jq = canvas_jq;
 
 
             let canvas_offset = canvas_jq.offset();
@@ -1079,10 +1498,20 @@ import { html, render, Component } from "./preact.htm.module.js"
             let pluck_index = 0;
             let midi_track;
             let notes;
-            window.midi_paused = true
+            window.midi_paused = true;
+            const MIDI_PAUSE_EVENT = 'midi_pause_changed';
+            function setMidiPaused(paused) {
+                const nextValue = !!paused;
+                window.midi_paused = nextValue;
+                window.dispatchEvent(new CustomEvent(MIDI_PAUSE_EVENT, { detail: { paused: nextValue } }));
+                if (nextValue) {
+                    stopAllWebAudioFontVoices();
+                }
+            }
+            window.setMidiPaused = setMidiPaused;
 
             let speed = 1;
-            let pluck_duration = 0.350;
+            const DEFAULT_PLUCK_DURATION = 0.35;
 
             let notes_map = {}
             let notes_map_cursors = {}
@@ -1119,7 +1548,7 @@ import { html, render, Component } from "./preact.htm.module.js"
             }
 
             function set_midi_track(new_midi_track) {
-                window.midi_paused = true;
+                setMidiPaused(true);
                 start_time = Date.now();
                 note_last_frame_ms = Date.now();
                 note_time_current = 0;
@@ -1154,6 +1583,12 @@ import { html, render, Component } from "./preact.htm.module.js"
                 
                 notes.forEach(note => {
                     note.time += 1; // leave time for pluck
+                    const durationFromMidi = typeof note.duration === 'number'
+                        ? note.duration
+                        : (typeof note.durationTicks === 'number' && midi_track.header && midi_track.header.ticksPerBeat
+                            ? note.durationTicks / midi_track.header.ticksPerBeat
+                            : 0.6);
+                    note.durationSeconds = Math.max(0.05, durationFromMidi);
                     if (!notes_map[note.midi]) {
                         notes_map[note.midi] = [];
                         notes_map_cursors[note.midi] = 0;
@@ -1193,14 +1628,14 @@ import { html, render, Component } from "./preact.htm.module.js"
                     clearTimeout(window.midi_start_timer);
                 }
                 window.midi_start_timer = setTimeout(() => {
-                    window.midi_paused = false;
+                    setMidiPaused(false);
                     start_time = Date.now();
                     note_last_frame_ms = Date.now();
                     note_time_current = 0;
 
                     const midi_length_seconds = Math.max(...notes.map(n => n.time));
                     const midi_track_name = midi_track.name;
-                    window.midi_paused = false;
+                    setMidiPaused(false);
                     const event = new CustomEvent('midi_loaded', { detail: { midi_length_seconds: midi_length_seconds , midi_track_name: midi_track_name } });
                     window.dispatchEvent(event);
                 }, 100)
@@ -1231,6 +1666,7 @@ import { html, render, Component } from "./preact.htm.module.js"
 
                 const scaledDelta = deltaSeconds * speed;
                 note_time_current += scaledDelta;
+                const midiBehavior = defaultMidiGuidance;
 
                 Object.keys(notes_map_cursors).forEach(midi_num => {
                     let cursor = notes_map_cursors[midi_num];
@@ -1239,24 +1675,44 @@ import { html, render, Component } from "./preact.htm.module.js"
                         let plucking_string = midi_string_map[note.midi]
                         if (plucking_string) {
                             const prev_note = notes_map[midi_num][cursor - 1];
-                            const time_since_prev_note = prev_note ? note.time - prev_note.time : undefined;
-                            const _pluck_duration = time_since_prev_note ? Math.min(pluck_duration, Math.max(0.05, time_since_prev_note / 6)) : pluck_duration;
+                            const timeSincePrevNote = prev_note ? note.time - prev_note.time : undefined;
+                            const desiredPrepDuration = midiBehavior && typeof midiBehavior.getPrepDuration === 'function'
+                                ? midiBehavior.getPrepDuration({
+                                    defaultDuration: DEFAULT_PLUCK_DURATION,
+                                    timeSincePrevNote,
+                                })
+                                : defaultMidiGuidance.getPrepDuration({
+                                    defaultDuration: DEFAULT_PLUCK_DURATION,
+                                    timeSincePrevNote,
+                                });
+                            const _pluck_duration = Math.max(0.05, desiredPrepDuration || DEFAULT_PLUCK_DURATION);
 
                             let pluck_time = Math.max((plucking_string.prev_note_time || 0), note.time - _pluck_duration);
 
                             if (note_time_current >= pluck_time) {
                                 const visualWidth = getStringVisualWidth(plucking_string);
-                                const velocity_based_x_offset = Math.max(0, Math.min(0.95, note.velocity ? Math.pow(note.velocity, 0.6) : 1)) * visualWidth / 2
-
-                                const high_freq_damping = smoothTransition(plucking_string.freq, 330, 880, 1, 0.5);
-
-                                let offsetX = plucking_string.string_center.x + velocity_based_x_offset * high_freq_damping;
+                                const velocity = typeof note.velocity === 'number' ? clamp(note.velocity, 0, 1) : 1;
+                                const horizontalGuide = midiBehavior && midiBehavior.getHorizontalOffset ? midiBehavior : defaultMidiGuidance;
+                                const computedOffsetX = horizontalGuide.getHorizontalOffset({
+                                    string: plucking_string,
+                                    velocity,
+                                    visualWidth,
+                                });
+                                const rawOffsetX = Number.isFinite(computedOffsetX) ? computedOffsetX : plucking_string.string_center.x;
+                                const halfWidth = visualWidth / 2;
+                                const minX = plucking_string.string_center.x - halfWidth;
+                                const maxX = plucking_string.string_center.x + halfWidth;
+                                const offsetX = visualWidth > 0 ? clamp(rawOffsetX, minX + 1, maxX - 1) : plucking_string.string_center.x;
 
                                 let progress = _pluck_duration > 0 ? (note_time_current - pluck_time) / _pluck_duration : 0.5;
-                                let velocity = Math.min(0.99, note.velocity ? note.velocity*2 : 1);
-                                let offsetY = plucking_string.string_center.y + Math.min(
-                                    plucking_string.string_slack-1, progress * Math.pow(velocity, 1.5) * plucking_string.string_slack
-                                );
+                                const normalizedProgress = clamp(progress, 0, 1);
+                                const verticalGuide = midiBehavior && midiBehavior.getVerticalOffset ? midiBehavior : defaultMidiGuidance;
+                                const computedOffsetY = verticalGuide.getVerticalOffset({
+                                    string: plucking_string,
+                                    velocity,
+                                    progress: normalizedProgress,
+                                });
+                                const offsetY = Number.isFinite(computedOffsetY) ? computedOffsetY : plucking_string.string_center.y;
                                 plucking_string.set_pluck_offsets(offsetX, offsetY);
                             }
                         }
@@ -1271,11 +1727,12 @@ import { html, render, Component } from "./preact.htm.module.js"
                         string.pluck();
                         string.prev_note_time = note.time;
                     }
+                    scheduleWebAudioFontNote(note);
                     note_index++;
                     notes_map_cursors[note.midi]++;
 
                     if (note_index >= notes.length) {
-                        window.midi_paused = true;
+                        setMidiPaused(true);
                         break;
                     }
                     note = notes[note_index];
@@ -1708,6 +2165,12 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                         midi_length_seconds: 0,
                         color_theme: window.color_theme,
                         color_motion_enabled: window.color_motion_enabled,
+                        instrument_loading: null,
+                        instrument_preset_id: window.instrument_preset_id,
+                        playing: false,
+                        midi_paused: window.midi_paused,
+                        show_main_menu: false,
+                        show_info: false,
                     }
                 }
                 componentDidMount() {
@@ -1769,6 +2232,16 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                         this.setState({ color_motion_enabled: enabled });
                     };
                     window.addEventListener('color_motion_changed', this.colorMotionListener);
+                    this.instrumentListener = (e) => {
+                        const instrumentId = e.detail?.instrument?.id || window.instrument_preset_id;
+                        this.setState({ instrument_preset_id: instrumentId });
+                    };
+                    window.addEventListener('instrument_changed', this.instrumentListener);
+                    this.midiPauseListener = (e) => {
+                        const paused = typeof e.detail?.paused === 'boolean' ? e.detail.paused : window.midi_paused;
+                        this.setState({ midi_paused: paused });
+                    };
+                    window.addEventListener(MIDI_PAUSE_EVENT, this.midiPauseListener);
 
                     // load midi list from midis/midis.json
                     fetch('midis/midis.json').then(r => r.json()).then(midis => {
@@ -1791,6 +2264,12 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                     if (this.colorMotionListener) {
                         window.removeEventListener('color_motion_changed', this.colorMotionListener);
                     }
+                    if (this.midiPauseListener) {
+                        window.removeEventListener(MIDI_PAUSE_EVENT, this.midiPauseListener);
+                    }
+                    if (this.instrumentListener) {
+                        window.removeEventListener('instrument_changed', this.instrumentListener);
+                    }
                 }
 
 
@@ -1798,7 +2277,7 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                     const touch_device = 'ontouchstart' in document.documentElement;
                     const preset_slugs = JSON.parse(localStorage.getItem('preset_slugs')) || [];
                     const presets = preset_slugs.map(slug => JSON.parse(localStorage.getItem('preset:' + slug)));
-                    const { canvas_mode, show_modes, show_main_menu, show_info, layout_mode } = this.state;
+                    const { show_main_menu, show_info, layout_mode, midi_paused } = this.state;
 
                     const grouped_midis = this.state.midis.reduce((acc, cur) => {
                         const folder = cur.split('/')[0];
@@ -1811,8 +2290,23 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                     const colorThemeOptions = (typeof window.getColorThemeOptions === 'function'
                         ? window.getColorThemeOptions()
                         : Object.values(window.ColorThemes || {}).map(theme => ({ id: theme.id, label: theme.label })));
+                    const instrumentOptions = (typeof window.getInstrumentOptions === 'function'
+                        ? window.getInstrumentOptions()
+                        : []);
                     const currentColorTheme = this.state.color_theme || window.color_theme || 'white';
                     const colorMotionEnabled = typeof this.state.color_motion_enabled === 'boolean' ? this.state.color_motion_enabled : !!window.color_motion_enabled;
+                    const currentInstrumentId = this.state.instrument_preset_id || window.instrument_preset_id || defaultInstrumentId;
+                    const instrumentLoadingId = this.state.instrument_loading;
+                    const colorThemeIds = colorThemeOptions.map(option => option.id);
+                    const colorThemePreviewStyle = {
+                        background: getColorThemePreviewStyle(currentColorTheme),
+                    };
+                    const currentColorThemeLabel = colorThemeOptions.find(option => option.id === currentColorTheme)?.label || 'Color Theme';
+                    const instrumentIds = instrumentOptions.map(option => option.id);
+                    const currentInstrument = instrumentOptions.find(option => option.id === currentInstrumentId);
+                    const currentInstrumentTitle = currentInstrument ? currentInstrument.label : 'Instrument';
+                    const currentInstrumentIcon = currentInstrument ? currentInstrument.icon : '♪';
+                    const layoutModeTitle = layout_mode === LayoutModes.classic ? 'String shape: Long to Short' : 'String shape: Uniform Pulse';
 
                     return html`
                             <div class='controls-top-right'>
@@ -1837,6 +2331,19 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                                             speed = 1;
                                         }}>${(speed).toFixed(2)}x speed</span>
                                         <span class='spacer'></span>
+                                        <div class='item midi-pause-button' onClick=${() => {
+                                            const currentlyPaused = !!window.midi_paused;
+                                            if (currentlyPaused) {
+                                                if(window.audioShader) {
+                                                    window.audioShader.resume();
+                                                }
+                                                setMidiPaused(false);
+                                            } else {
+                                                setMidiPaused(true);
+                                            }
+                                        }}>
+                                            ${midi_paused ? "▶ Continue" : "⏸ Pause"}
+                                        </div>
                                         <div class='item' onClick=${async () => {
                                             if(!this.state.playing) {
                                                 const midi_file = this.state.selected_midi;
@@ -1847,7 +2354,7 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                                                 this.setState({ playing: false });
                                                 // stop plucking all strings
                                                 pluckableStrings.forEach(s => s.reset_pluck_offsets());
-                                                window.midi_paused = true;
+                                                setMidiPaused(true);
                                             }
                                         }}>
                                             ${this.state.playing ? "▧ Stop" : "▶️ Play"}
@@ -1868,31 +2375,83 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                                         
                                         this.setState({ show_info: !show_info });
                                     }}>
-                                        ${show_modes ? `ⓧ` : html`<span class='infotoggle'>❓</span>`}
+                                        ${show_info ? `ⓧ` : html`<span class='infotoggle'>❓</span>`}
                                 </${DivCustomClick}>
 
-                                <div class='color-theme-panel'>
-                                    <label class='color-theme-select'>
-                                        <span>Color Theme</span>
-                                        <select value=${currentColorTheme} onChange=${(e) => {
-                                            const value = e.target.value;
-                                            window.setColorTheme(value);
-                                            this.setState({ color_theme: value });
-                                        }}>
-                                            ${colorThemeOptions.map(option => html`<option value=${option.id} key=${option.id}>${option.label}</option>`)}
-                                        </select>
-                                    </label>
-                                    <label class='color-motion-toggle'>
-                                        <input
-                                            type='checkbox'
-                                            checked=${colorMotionEnabled}
-                                            onChange=${(e) => {
-                                                window.setColorMotionEnabled(e.target.checked);
-                                                this.setState({ color_motion_enabled: e.target.checked });
+                                <div class='minimal-control-bar'>
+                                    <button
+                                        type='button'
+                                        class='control-icon-button color-theme-icon'
+                                        title=${`Color theme: ${currentColorThemeLabel}. Click to cycle.`}
+                                        aria-label='Cycle color theme'
+                                        onClick=${() => {
+                                            if (!colorThemeIds.length) {
+                                                return;
+                                            }
+                                            const nextTheme = getNextListValue(colorThemeIds, currentColorTheme);
+                                            window.setColorTheme(nextTheme);
+                                            this.setState({ color_theme: nextTheme });
+                                        }}
+                                    >
+                                        <span class='color-theme-swatch' style=${colorThemePreviewStyle}></span>
+                                    </button>
+
+                                    <button
+                                        type='button'
+                                        class=${`control-icon-button color-motion-icon ${colorMotionEnabled ? 'active' : ''}`}
+                                        title=${`Color motion: ${colorMotionEnabled ? 'On' : 'Off'}`}
+                                        aria-pressed=${colorMotionEnabled}
+                                        aria-label='Toggle color motion'
+                                        onClick=${() => {
+                                            const nextValue = !colorMotionEnabled;
+                                            window.setColorMotionEnabled(nextValue);
+                                            this.setState({ color_motion_enabled: nextValue });
+                                        }}
+                                    >
+                                        <span class='color-motion-glyph'></span>
+                                    </button>
+
+                                    ${instrumentOptions.length ? html`
+                                        <button
+                                            type='button'
+                                            class=${`control-icon-button instrument-icon ${instrumentLoadingId ? 'loading' : ''}`}
+                                            title=${`${currentInstrumentTitle}${instrumentLoadingId ? ' (loading...)' : ''}`}
+                                            aria-label='Cycle instrument'
+                                            onClick=${async () => {
+                                                if (!instrumentOptions.length || instrumentLoadingId) {
+                                                    return;
+                                                }
+                                                const nextInstrumentId = getNextListValue(instrumentIds, currentInstrumentId);
+                                                this.setState({ instrument_loading: nextInstrumentId });
+                                                try {
+                                                    await window.setInstrumentPreset(nextInstrumentId);
+                                                    this.setState({ instrument_preset_id: nextInstrumentId });
+                                                } finally {
+                                                    this.setState({ instrument_loading: null });
+                                                }
                                             }}
-                                        />
-                                        <span>Color Motion</span>
-                                    </label>
+                                        >
+                                            ${instrumentLoadingId ? html`<span class='control-spinner'></span>` : html`<span class='instrument-glyph'>${currentInstrumentIcon}</span>`}
+                                        </button>
+                                    ` : html``}
+
+                                    <button
+                                        type='button'
+                                        class=${`control-icon-button string-shape-icon ${layout_mode === LayoutModes.uniform ? 'uniform' : 'classic'}`}
+                                        title=${layoutModeTitle}
+                                        aria-label='Toggle string layout'
+                                        onClick=${() => {
+                                            const nextLayout = layout_mode === LayoutModes.classic ? LayoutModes.uniform : LayoutModes.classic;
+                                            setLayoutMode(nextLayout);
+                                            this.setState({ layout_mode: nextLayout });
+                                        }}
+                                    >
+                                        <span class='string-shape-lines'>
+                                            <span class='line'></span>
+                                            <span class='line'></span>
+                                            <span class='line'></span>
+                                        </span>
+                                    </button>
                                 </div>
 
                                 ${show_info ? html`
@@ -1901,14 +2460,6 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                                             <h1>Pluck</h1>
                                             <p style='opacity: 0.6; font-style: italic;'>by Murat</p> 
                                             <p style='font-size: 1.2em; font-weight: bold; color: rgba(104, 33, 204, 1);'>A math-based string simulator. </p>
-                                            <p style='padding: 10px 15px; margin: 10px 0; background: rgba(240, 242, 205, 0.47); border-radius: 5px; box-shadow: 0 0 5px #00000044;'>
-                                                Download on Apple App Store for $1.99
-                                                <br /><a target='_blank' href='https://apps.apple.com/ca/app/pluck/id6502628890'><img style='height: 50px; margin: 10px 0;' src='./appstore.svg' alt='Download on the App Store' /></a>
-                                                <ul style='font-size: 0.8em; opacity: 0.6; margin: 0'>
-                                                    <li>It's fun to have on iPad with multitouch, especially for kids (even 1 year olds). </li>
-                                                    <li>Support this project</li>
-                                                </ul>
-                                            </p>
                                             <p style='font-size: 1.2em; font-weight: bold;'>Both the audio and visuals are generated using the same math, rendered at different speeds so the eye can see.
                                             </p>
                                             <p>No tricks or audio files are used: everything is calculated from raw sine waves, with a theory of how energy is released in a pluck.</p>
@@ -1949,109 +2500,7 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
 
                             
                             <div class='controls-bottom-left'>
-
-                                ${show_modes ? html`
-                                    <div class='strings-menu'>
-                                        <div class='item' onClick=${() => {
-                                            resetAndAddStrings(canvas_jq, []);
-                                        }}>
-                                            🧹 Clear all
-                                        </div>
-                                        <br />
-                                        <div class='item' onClick=${() => {
-                                            const name = prompt('Save preset as');
-                                            // convert name to slug
-                                            const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '').replace(/^-/, '');
-                                            // save to localstorage
-                                            const preset_slugs = JSON.parse(localStorage.getItem('preset_slugs')) || [];
-                                            if (preset_slugs.includes(slug)) {
-                                                const overwrite = confirm('Overwrite existing preset?');
-                                                if (!overwrite) {
-                                                    return;
-                                                }
-                                            }
-                                            preset_slugs.push(slug);
-                                            const screen = { width, height };
-                                            console.log('screen', screen);
-                                            localStorage.setItem('preset_slugs', JSON.stringify(preset_slugs));
-                                            localStorage.setItem('preset:' + slug, JSON.stringify({ name, slug, strings: pluckableStrings.map(s => { return { string_center: s.string_center, freq: s.freq, string_width: s.string_width, angle: s.angle, screen } }) }));
-
-                                            this.setState({ trigger_rerender: Date.now() });
-                                        }}>
-                                            💾 Save
-                                        </div>
-                                    </div>
-                                ` : html``}
-                                      
                                 <div class='controls-bottom-left-flex'>
-                                    <${DivCustomClick} class='item toggle ${show_modes ? '' : ''}' onClick=${() => {
-                                            if(show_modes && this.state.canvas_mode != CanvasModes.pluck) {
-                                                // enter pluck mode
-                                                if(this.state.canvas_mode == CanvasModes.draw) {
-                                                    stop_drawing();
-                                                }
-                                                this.setState({ canvas_mode: CanvasModes.pluck });
-                                                window.canvas_mode = CanvasModes.pluck;
-                                            }
-                                            this.setState({ show_modes: !show_modes });
-                                        }}>
-                                            ${show_modes ? `ⓧ` : `✏️`}
-                                    </${DivCustomClick}>
-
-                                    ${show_modes ? html`
-                                        <div class='draw-mode-button item toggle'>
-                                            <span class='choice ${canvas_mode == CanvasModes.pluck ? 'selected' : ''}' onClick=${() => {
-                                    this.setState({ canvas_mode: CanvasModes.pluck });
-                                    window.canvas_mode = CanvasModes.pluck;
-                                    stop_drawing();
-                                }}>
-                                                ${pick_svg} Pluck
-                                            </span>
-                                            <span class='choice ${canvas_mode == CanvasModes.draw ? 'selected' : ''}' onClick=${() => {
-                                    this.setState({ canvas_mode: CanvasModes.draw });
-                                    window.canvas_mode = CanvasModes.draw;
-                                    start_drawing();
-                                }}>
-                                                ✏️ Draw
-                                            </span>
-                                            <span class='choice ${canvas_mode == CanvasModes.erase ? 'selected' : ''}' onClick=${() => {
-                                    this.setState({ canvas_mode: CanvasModes.erase });
-                                    window.canvas_mode = CanvasModes.erase;
-                                    // start_drawing();
-                                }}>
-                                                🧽 Erase
-                                            </span>
-                                            <span class='choice ${canvas_mode == CanvasModes.move ? 'selected' : ''}' onClick=${() => {
-                                                this.setState({ canvas_mode: CanvasModes.move });
-                                                window.canvas_mode = CanvasModes.move;
-                                                // start_drawing();
-                                            }}>
-                                                ☛ Move
-                                            </span>
-                                        </div>
-
-                                        <div class='item toggle ${canvas_mode == CanvasModes.draw ? '' : 'inactive'}' onClick=${() => {
-                                        this.setState({ snap_to_note: !this.state.snap_to_note });
-                                        window.snap_to_note = !this.state.snap_to_note;
-                                        }}>
-                                            <span class='choice ${this.state.snap_to_note ? 'selected' : ''}'>Snap to note</span>
-                                            <span class='choice ${this.state.snap_to_note ? '' : 'selected'}'>Precise</span>
-                                        </div>
-                                        <div class='item toggle'>
-                                            <span class='choice ${layout_mode == LayoutModes.classic ? 'selected' : ''}' onClick=${() => {
-                                                setLayoutMode(LayoutModes.classic);
-                                                this.setState({ layout_mode: LayoutModes.classic });
-                                            }}>Long->Short</span>
-                                            <span class='choice ${layout_mode == LayoutModes.uniform ? 'selected' : ''}' onClick=${() => {
-                                                setLayoutMode(LayoutModes.uniform);
-                                                this.setState({ layout_mode: LayoutModes.uniform });
-                                            }}>Uniform Pulse</span>
-                                        </div>
-                                    ` : html`
-                                    `}
-                                    <div class='gap'></div>
-
-
                                     <${DivCustomClick} class='item toggle ${show_main_menu ? '' : ''}' onClick=${() => {
                                             this.setState({ show_main_menu: !show_main_menu });
                                         }}>
