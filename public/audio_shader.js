@@ -287,9 +287,11 @@ function AudioShader(num_strings, num_overtones) {
         shaderLimiterNode.release.value = 0.25;
         const shaderGainNode = this.audioCtx.createGain();
         const DEFAULT_SHADER_GAIN = 9.5; // this is best to make the legacy string be the same loudness as the others.
+        this.baseOutputGain = DEFAULT_SHADER_GAIN;
+        const masterVolume = typeof window.master_volume === 'number' ? Math.max(0, window.master_volume) : 1;
         const initialShaderGain = typeof window.shader_output_gain === 'number'
             ? window.shader_output_gain
-            : DEFAULT_SHADER_GAIN;
+            : DEFAULT_SHADER_GAIN * masterVolume;
         shaderGainNode.gain.value = initialShaderGain;
         window.shader_output_gain = initialShaderGain;
         node.connect(shaderLimiterNode);
@@ -301,6 +303,13 @@ function AudioShader(num_strings, num_overtones) {
             const resolved = typeof value === 'number' ? value : 1;
             shaderGainNode.gain.value = resolved;
             window.shader_output_gain = resolved;
+        };
+        this.applyMasterVolume = (volumeScalar = 1) => {
+            const baseGain = typeof this.baseOutputGain === 'number' ? this.baseOutputGain : DEFAULT_SHADER_GAIN;
+            const safeVolume = Math.max(0, typeof volumeScalar === 'number' ? volumeScalar : 1);
+            const gainValue = baseGain * safeVolume;
+            shaderGainNode.gain.value = gainValue;
+            window.shader_output_gain = gainValue;
         };
 
         if (typeof window.setMidiSchedulerSource === 'function') {

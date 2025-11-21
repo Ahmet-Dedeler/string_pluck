@@ -1,12 +1,64 @@
 X_INCREMENT = 5;
 
-const COLOR_PLUCKING = [185, 130, 225];
-const COLOR_PLUCKED = [255, 255, 255];
-const COLOR_IDLE = [40, 40, 40];
-const COLOR_DRAW = [150, 185, 150];
-const COLOR_MOVE = [90, 90, 155];
-const COLOR_ERASE = [245, 215, 215];
-const COLOR_HOVER = [255, 255, 255];
+let COLOR_PLUCKING = [185, 130, 225];
+let COLOR_PLUCKED = [255, 255, 255];
+let COLOR_IDLE = [40, 40, 40];
+let COLOR_DRAW = [150, 185, 150];
+let COLOR_MOVE = [90, 90, 155];
+let COLOR_ERASE = [245, 215, 215];
+let COLOR_HOVER = [255, 255, 255];
+
+function getCssVariableColor(variableName) {
+    if (typeof getComputedStyle === 'undefined') return null;
+    const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+    if (!value) return null;
+    
+    // Handle hex
+    if (value.startsWith('#')) {
+        const hex = value.substring(1);
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+        return [r, g, b];
+    }
+    
+    // Handle rgb/rgba
+    const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (match) {
+        return [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
+    }
+    
+    // Handle named colors (basic support)
+    if (value === 'white') return [255, 255, 255];
+    if (value === 'black') return [0, 0, 0];
+    
+    return null;
+}
+
+window.updateThemeColors = function() {
+    const textColor = getCssVariableColor('--text-color');
+    const bgColor = getCssVariableColor('--bg-color');
+    
+    if (textColor) {
+        COLOR_PLUCKED = textColor;
+        COLOR_HOVER = textColor;
+    }
+    
+    // For idle strings, we want them to be visible against the background
+    // In dark mode (bg black), idle is dark grey [40, 40, 40]
+    // In light mode (bg white), idle should be light grey or dark grey?
+    // Let's make them subtle but visible.
+    
+    const isLightMode = document.documentElement.getAttribute('data-theme') === 'light';
+    
+    if (isLightMode) {
+        COLOR_IDLE = [200, 200, 200]; // Light grey for light mode
+        COLOR_PLUCKING = [100, 50, 180]; // Darker purple for light mode
+    } else {
+        COLOR_IDLE = [40, 40, 40];
+        COLOR_PLUCKING = [185, 130, 225];
+    }
+}
 
 window.NOTE_FONT = "15px Arial";
 
