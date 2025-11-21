@@ -75,6 +75,8 @@ string_pluck/
 └── DEPLOYMENT.md       # Full deployment guide
 ```
 
+> ℹ️ All playable MIDI assets now live exclusively under `public/midis/`. After adding new files, run `node public/midis/sync.js` to rebuild `public/midis/midis.json`, which the app fetches at runtime.
+
 ## 🔍 What Wasn't Changed
 
 - ❌ No refactoring of core logic

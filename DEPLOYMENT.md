@@ -124,7 +124,11 @@ The app requires these headers (already configured in `vercel.json`):
 - `Cross-Origin-Opener-Policy: same-origin`
 
 ### MIDI Files Not Loading
-Ensure all MIDI files are in `/public/midis/` and listed in `/public/midis/midis.json`
+Ensure all MIDI files are in `/public/midis/` and listed in `/public/midis/midis.json`. After adding or removing files, regenerate the manifest with:
+
+```bash
+node public/midis/sync.js
+```
 
 ## 📱 Browser Compatibility
 
