@@ -1666,7 +1666,11 @@ import { html, render, Component } from "./preact.htm.module.js"
 
             const midi_strings = getMidiNoteStrings(canvas_jq, Object.keys(notes_map));
             // check if every existing string matches the new midi strings
-            if (!midi_strings.every(s => pluckableStrings.some(p => p.string_widthfreq == s.freq))) {
+            const stringsMatchCurrentLayout = () => {
+                if (pluckableStrings.length !== midi_strings.length) return false;
+                return midi_strings.every(s => pluckableStrings.some(p => Math.abs((p.freq || 0) - (s.freq || 0)) < 1e-6));
+            };
+            if (!stringsMatchCurrentLayout()) {
                 resetAndAddStrings(canvas_jq, midi_strings, { skip_audio: false });
             }
 
@@ -2110,7 +2114,7 @@ import { html, render, Component } from "./preact.htm.module.js"
 
             if (event.type === 'touchstart' || event.type === 'mousedown') {
                 always_pluck = true;
-                Object.values(touchInstances).filter(ti => ti.x & ti.y).forEach(touch => {
+                Object.values(touchInstances).filter(ti => ti.x && ti.y).forEach(touch => {
                     cursor_move_handler(touch);
                 })
             }
