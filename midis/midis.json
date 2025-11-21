@@ -7,8 +7,8 @@
     "Cello Suites no. 1 BWV 1007.mid",
     "Fugue BWV 578.mid",
     "Prelude & Fugue BWV 894.mid",
-    "the-art-of-fugue-bwv-1080-contrapunctus-14.mid",
-    "Toccatta & Fugue BWV 565.mid"
+    "Toccatta & Fugue BWV 565.mid",
+    "the-art-of-fugue-bwv-1080-contrapunctus-14.mid"
   ],
   "Beatles": [],
   "Beethoven": [
@@ -49,13 +49,22 @@
     "La Campanella.mid",
     "Sospiro.mid"
   ],
+  "Misc": [
+    "Kansas - Dust in the Wind.mid",
+    "Led Zeppelin - Stairway to Heaven.mid",
+    "Puff the Magic Dragon.mid",
+    "Tetris theme (Korobeiniki).mid",
+    "basic_pitch_transcription.mid",
+    "raindrops-keep-falling-on-my-head.mid"
+  ],
   "Monkey Island": [],
   "Mozart": [
     "Alla Turca.mid",
     "Eine Kleine Nachtmusik No. 2.mid",
     "Piano Sonata No. 13.mid",
     "mozart-requiem-iii-dies-irae.mid",
-    "mozart-rex-tremendae-majestatis-from-requiem-satb-with-piano.mid"
+    "mozart-rex-tremendae-majestatis-from-requiem-satb-with-piano.mid",
+    "symphony-no25-in-g-minor-k183173db-wolfgang-amadeus-mozart-i-allegro-con-brio.mid"
   ],
   "Pachelbel": [
     "Canon in D.mid"
@@ -83,13 +92,5 @@
   ],
   "Verdi": [
     "messa-da-requiem-ii-dies-irae-dies-irae-tuba-mirum-giuseppe-verdi.mid"
-  ],
-  "misc": [
-    "basic_pitch_transcription.mid",
-    "Kansas - Dust in the Wind.mid",
-    "Led Zeppelin - Stairway to Heaven.mid",
-    "Puff the Magic Dragon.mid",
-    "raindrops-keep-falling-on-my-head.mid",
-    "Tetris theme (Korobeiniki).mid"
   ]
 }
