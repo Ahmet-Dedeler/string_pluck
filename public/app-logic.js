@@ -49,6 +49,20 @@ import { html, render, Component } from "./preact.htm.module.js"
         return clampedOrder / (total - 1);
     }
 
+    const truncateTrackName = (name, maxLength = 50) => {
+        if (typeof name !== 'string' || !name.length) {
+            return '';
+        }
+        const ellipsis = '...';
+        if (name.length <= maxLength) {
+            return name;
+        }
+        if (maxLength <= ellipsis.length) {
+            return ellipsis.slice(0, maxLength);
+        }
+        return `${name.slice(0, maxLength - ellipsis.length).trimEnd()}${ellipsis}`;
+    };
+
     const createHueTheme = ({
         id,
         label,
@@ -2378,6 +2392,7 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                     ? this.state.master_volume
                     : (typeof window.getMasterVolume === 'function' ? window.getMasterVolume() : DEFAULT_MASTER_VOLUME);
                 const volumePercent = Math.round(masterVolume * 100);
+                const displayedTrackName = truncateTrackName(this.state.midi_track_name, 50);
 
                 return html`
                             <div class='controls-top-right'>
@@ -2386,7 +2401,7 @@ Created by potrace 1.15, written by Peter Selinger 2001-2017
                                         ${this.state.playing ? html`
                                             <div class='midi-progress-bar'>
                                                 <span class='midi-progress-bar-fill' style='width: ${this.state.midi_progress_percentage}%'></span>
-                                                ${' '}${this.state.midi_track_name} [${Math.round(this.state.midi_length_seconds / 60)}:${Math.round(this.state.midi_length_seconds % 60).toString().padStart(2, '0')}]
+                                                ${' '}${displayedTrackName} [${Math.round(this.state.midi_length_seconds / 60)}:${Math.round(this.state.midi_length_seconds % 60).toString().padStart(2, '0')}]
                                                 ${' '}
                                             </div>
                                         ` : html``}
