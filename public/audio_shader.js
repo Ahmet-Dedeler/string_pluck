@@ -187,7 +187,7 @@ function AudioShader(num_strings, num_overtones) {
         this.program = program;
         const samples = WIDTH * HEIGHT;
 
-        this.uniforms = getUniformLocations(gl, program, ['u_sampleRate', 'u_blockOffset', 'u_resolution', 'u_overtones', 'u_stringDurations']);
+        this.uniforms = getUniformLocations(gl, program, ['u_sampleRate', 'u_blockOffset', 'u_resolution', 'u_overtones', 'u_stringDurations', 'u_overtones_texture']);
 
         gl.useProgram(program);
         gl.uniform1f(this.uniforms['u_sampleRate'], this.audioCtx.sampleRate);
@@ -222,12 +222,17 @@ function AudioShader(num_strings, num_overtones) {
         }
         gl.uniform1fv(this.uniforms['u_overtones'], overtone_amplitudes);
         
-        var texture = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, overtone_amplitudes.length, 1, 0, gl.RGBA, gl.FLOAT, this.overtones_texture);
+        const textureWidth = num_strings * num_overtones;
+        this.overtonesTexture = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.overtonesTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, textureWidth, 1, 0, gl.RGBA, gl.FLOAT, this.overtones_texture);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.uniform1f(this.uniforms['u_overtones_texture'], this.overtones_texture);
+        if (this.uniforms['u_overtones_texture']) {
+            gl.uniform1i(this.uniforms['u_overtones_texture'], 0);
+        }
+        this.pixelBuffer = new Uint8Array(samples * 4);
         
         // console.log("Max fragment uniform vectors", gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS));
         
@@ -237,7 +242,7 @@ function AudioShader(num_strings, num_overtones) {
             if(window.idle) {
                 return
             }
-            const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+            const pixels = this.pixelBuffer;
             const outputL = e.outputBuffer.getChannelData(0);
             const outputR = e.outputBuffer.getChannelData(1);
             
@@ -255,8 +260,9 @@ function AudioShader(num_strings, num_overtones) {
             this.blockOffset += 1;
             this.wrap_blockOffset();
 
-            gl.uniform1f(this.uniforms['u_overtones_texture'], this.overtones_texture);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, num_strings * num_overtones, 1, 0, gl.RGBA, gl.FLOAT, this.overtones_texture);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, this.overtonesTexture);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, 1, gl.RGBA, gl.FLOAT, this.overtones_texture);
             this.update_queued = false;
 
             for (let i = 0; i < num_strings; i++) {
@@ -394,6 +400,10 @@ function AudioShader(num_strings, num_overtones) {
     }
 
     this.destroy = async function () {
+        if (this.overtonesTexture) {
+            gl.deleteTexture(this.overtonesTexture);
+            this.overtonesTexture = null;
+        }
         gl.deleteProgram(this.program);
         this.node.disconnect();
         this.audioCtx.close();

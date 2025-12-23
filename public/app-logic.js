@@ -1584,6 +1584,7 @@ import { html, render, Component } from "./preact.htm.module.js"
         let last_frame_time_ms = Date.now();
         let note_last_frame_ms = Date.now();
         let midi_progress_time = 0;
+        let midi_object_url = null;
         let note_time_current = 0;
         const COLOR_MOTION_SPEED_DEG_PER_SEC = 90;
         const COLOR_MOTION_SPEED_DEG_PER_MS = COLOR_MOTION_SPEED_DEG_PER_SEC / 1000;
@@ -1595,9 +1596,18 @@ import { html, render, Component } from "./preact.htm.module.js"
             // sate to blob
             let midi_blob = new Blob([midi_file], { type: 'audio/midi' });
             // create a URL for the blob
+            if (midi_object_url) {
+                URL.revokeObjectURL(midi_object_url);
+                midi_object_url = null;
+            }
             let midi_url = URL.createObjectURL(midi_blob);
+            midi_object_url = midi_url;
             // use tonejs to load the midi file
             let midi_json = await Midi.fromUrl(midi_url);
+            if (midi_object_url === midi_url) {
+                URL.revokeObjectURL(midi_url);
+                midi_object_url = null;
+            }
 
 
             midi_json.name = url.replace('./midis/', '').replace('.mid', '').replace('/', ': ');
